@@ -12,13 +12,12 @@ import (
 
 // ---- Theme (Figma-like dark) ----
 var (
-	bg     = lipgloss.Color("#0B0B0B") // near-black canvas
 	fg     = lipgloss.Color("#FFFFFF") // pure white text
 	muted  = lipgloss.Color("#9B9B9B") // dim grey
 	accent = lipgloss.Color("#FF5C39") // Figma orange accent
 )
 
-const figFont = "big" // FIGlet font for the big titles
+const titleFont = "big" // FIGlet font for slide titles
 
 // ---- Slides ----
 type kind int
@@ -31,7 +30,7 @@ const (
 type slide struct {
 	kind  kind
 	title string
-	body  string
+	body  string // may contain multiple lines separated by "\n"
 }
 
 var slides = []slide{
@@ -85,17 +84,17 @@ func visibleWidth(s string) int {
 	return max
 }
 
-func fig(s string) string {
-	return strings.TrimRight(figure.NewFigure(s, figFont, true).String(), "\n")
+func fig(s, font string) string {
+	return strings.TrimRight(figure.NewFigure(s, font, true).String(), "\n")
 }
 
-// bigText renders s as FIGlet art, wrapping word-by-word so it never
-// exceeds maxWidth. Each wrapped group becomes its own stacked block.
-func bigText(s string, maxWidth int) string {
+// bigText renders s as FIGlet art in the given font, wrapping word-by-word
+// so it never exceeds maxWidth. Each wrapped group becomes a stacked block.
+func bigText(s string, maxWidth int, font string) string {
 	if maxWidth < 10 {
-		return s // terminal too narrow for art; fall back to plain
+		return s
 	}
-	whole := fig(s)
+	whole := fig(s, font)
 	if visibleWidth(whole) <= maxWidth {
 		return whole
 	}
@@ -108,7 +107,7 @@ func bigText(s string, maxWidth int) string {
 			continue
 		}
 		try := cur + " " + wd
-		if visibleWidth(fig(try)) <= maxWidth {
+		if visibleWidth(fig(try, font)) <= maxWidth {
 			cur = try
 		} else {
 			groups = append(groups, cur)
@@ -120,24 +119,28 @@ func bigText(s string, maxWidth int) string {
 	}
 	blocks := make([]string, len(groups))
 	for i, g := range groups {
-		blocks[i] = fig(g)
+		blocks[i] = fig(g, font)
 	}
 	return strings.Join(blocks, "\n")
 }
 
 func (m model) View() string {
 	if m.w == 0 {
-		return "" // wait for first WindowSizeMsg
+		return ""
 	}
 
 	s := slides[m.idx]
 	maxW := m.w - 8
+	avail := m.h - 1 // rows above the footer
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(fg)
-	bodyStyle := lipgloss.NewStyle().Foreground(fg)
+	// Body is plain regular text (bold for a little extra weight).
+	// A terminal can't enlarge real glyphs from inside the app — zoom the
+	// terminal itself (Ctrl + =) if you want the body text physically bigger.
+	bodyStyle := lipgloss.NewStyle().Bold(true).Foreground(fg)
 	barStyle := lipgloss.NewStyle().Foreground(accent)
 
-	bigTitle := titleStyle.Render(bigText(s.title, maxW))
+	bigTitle := titleStyle.Render(bigText(s.title, maxW, titleFont))
 	barWidth := visibleWidth(bigTitle)
 	if barWidth > maxW {
 		barWidth = maxW
@@ -145,10 +148,9 @@ func (m model) View() string {
 	underline := barStyle.Render(strings.Repeat("━", barWidth))
 
 	var block string
-	switch s.kind {
-	case cover:
+	if s.kind == cover {
 		block = lipgloss.JoinVertical(lipgloss.Left, bigTitle, underline)
-	default:
+	} else {
 		block = lipgloss.JoinVertical(
 			lipgloss.Left,
 			bigTitle,
@@ -158,11 +160,12 @@ func (m model) View() string {
 		)
 	}
 
+	// No background fill: empty cells stay transparent so the terminal's
+	// own background (image / acrylic / theme) shows through.
 	canvas := lipgloss.NewStyle().
 		Width(m.w).
-		Height(m.h-1).
-		Background(bg).
-		Render(lipgloss.Place(m.w, m.h-1, lipgloss.Center, lipgloss.Center, block))
+		Height(avail).
+		Render(lipgloss.Place(m.w, avail, lipgloss.Center, lipgloss.Center, block))
 
 	return canvas + "\n" + m.footer()
 }
@@ -178,7 +181,7 @@ func (m model) footer() string {
 		gap = 1
 	}
 	bar := left + strings.Repeat(" ", gap) + right
-	return lipgloss.NewStyle().Width(m.w).Background(bg).Render(bar)
+	return lipgloss.NewStyle().Width(m.w).Render(bar)
 }
 
 func main() {
